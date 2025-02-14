@@ -6,29 +6,13 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"encoding/json"
-	"encoding/pem"
 	"errors"
-	"os"
 	"path"
-	"path/filepath"
 )
 
 type Credentials struct {
 	DefaultProfileName string
 	CredentialsFile    string
-}
-
-type Identity struct {
-	PublicKey []byte `json:"public_key"` // Encoded public key (optional, can be derived from private key)
-	KeyType   string `json:"key_type"`   // Key type (e.g., "ed25519", "p256")
-}
-
-type Profile struct {
-	Identity
-	Name       string `json:"name"`        // Profile name
-	PrivateKey []byte `json:"private_key"` // Encoded private key
 }
 
 func NewCredentials(packageName string) *Credentials {
@@ -49,8 +33,6 @@ func (c *Credentials) CreateKey(profileName string, keyType string) (*Profile, e
 	switch keyType {
 	case "ed25519":
 		_, privateKey, err = ed25519.GenerateKey(rand.Reader)
-	case "p224":
-		privateKey, err = ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
 	case "p256":
 		privateKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	case "p384":
@@ -58,7 +40,7 @@ func (c *Credentials) CreateKey(profileName string, keyType string) (*Profile, e
 	case "p521":
 		privateKey, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	default:
-		return nil, errors.New("unsupported key type, expected one of: ed25519, p224, p256, p384, p521")
+		return nil, errors.New("unsupported key type, expected one of: ed25519, p256, p384, p521")
 	}
 	if err != nil {
 		return nil, err
@@ -66,48 +48,17 @@ func (c *Credentials) CreateKey(profileName string, keyType string) (*Profile, e
 
 	// TODO: Encryption
 
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		return nil, err
+	var privateKeyBytes []byte
+	if ed25519PrivateKey, ok := privateKey.(ed25519.PrivateKey); ok {
+		privateKeyBytes = []byte(ed25519PrivateKey)
+	} else if ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey); ok {
+		privateKeyBytes = ecdsaPrivateKey.D.Bytes()
 	}
-
-	privateKeyPEM := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "PRIVATE KEY",
-			Bytes: privateKeyBytes,
-		},
-	)
-
-	var publicKeyBytes []byte
-	switch keyType {
-	case "ed25519":
-		publicKey := privateKey.(ed25519.PrivateKey).Public()
-		publicKeyBytes, err = x509.MarshalPKIXPublicKey(publicKey)
-	case "p224":
-	case "p256":
-	case "p384":
-	case "p521":
-		publicKey := privateKey.(*ecdsa.PrivateKey).Public()
-		publicKeyBytes, err = x509.MarshalPKIXPublicKey(publicKey)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	publicKeyPEM := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "PUBLIC KEY",
-			Bytes: publicKeyBytes,
-		},
-	)
 
 	profile := &Profile{
-		Identity: Identity{
-			PublicKey: publicKeyPEM,
-			KeyType:   keyType,
-		},
+		KeyType:    keyType,
 		Name:       profileName,
-		PrivateKey: privateKeyPEM,
+		PrivateKey: privateKeyBytes,
 	}
 
 	if err := c.saveProfile(profile); err != nil {
@@ -151,97 +102,5 @@ func (c *Credentials) GetKeyPair(profileName string) (crypto.PrivateKey, crypto.
 	if err != nil {
 		return nil, nil, err
 	}
-
-	block, _ := pem.Decode(profile.PrivateKey)
-	if block == nil {
-		return nil, nil, errors.New("failed to parse PEM block containing the private key")
-	}
-
-	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var publicKey crypto.PublicKey
-	block, _ = pem.Decode(profile.PublicKey)
-	if block == nil {
-		return nil, nil, errors.New("failed to parse PEM block containing the public key")
-	}
-
-	publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return privateKey, publicKey, nil
-}
-
-func (c *Credentials) credentialsPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, c.CredentialsFile), nil
-}
-
-func (c *Credentials) saveProfile(profile *Profile) error {
-	path, err := c.credentialsPath()
-	if err != nil {
-		return err
-	}
-
-	if _, err := os.Stat(filepath.Dir(path)); os.IsNotExist(err) {
-		os.MkdirAll(filepath.Dir(path), 0700)
-	}
-
-	profiles, err := c.loadProfiles()
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if profiles == nil {
-		profiles = make(map[string]*Profile)
-	}
-
-	profiles[profile.Name] = profile
-
-	data, err := json.MarshalIndent(profiles, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0600)
-}
-
-func (c *Credentials) loadProfile(profileName string) (*Profile, error) {
-	profiles, err := c.loadProfiles()
-	if err != nil {
-		return nil, err
-	}
-
-	profile, ok := profiles[profileName]
-	if !ok {
-		return nil, errors.New("profile not found")
-	}
-
-	return profile, nil
-}
-
-func (c *Credentials) loadProfiles() (map[string]*Profile, error) {
-	path, err := c.credentialsPath()
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var profiles = make(map[string]*Profile)
-	err = json.Unmarshal(data, &profiles)
-	if err != nil {
-		return nil, err
-	}
-
-	return profiles, nil
+	return profile.getPrivateKey(), profile.getPublicKey(), nil
 }

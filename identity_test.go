@@ -41,7 +41,7 @@ func TestNewCredentials(t *testing.T) {
 
 	// Now install
 
-	validKeyTypes := []string{"ed25519", "p224", "p256", "p384", "p521"}
+	validKeyTypes := []string{"ed25519", "p256", "p384", "p521"}
 	for _, keyType := range validKeyTypes {
 		if _, err := creds.CreateKey(keyType, keyType); err != nil {
 			t.Errorf("CreateKey(%q) = %v, want nil", keyType, err)

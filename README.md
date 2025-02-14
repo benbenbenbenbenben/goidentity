@@ -9,7 +9,7 @@ Like the thing AWS CLI does for credentials except with keys.
 - Profile-based **EC key** management.
 - Easy to use API for **generating and loading key pairs**.
 - Simple JSON configuration format.
-- Supports **ed25519, p224, p256, p384, and p521 key types**.
+- Supports **ed25519, p256, p384, and p521 key types**.
 
 ## Installation
 
