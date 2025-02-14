@@ -68,3 +68,4 @@ func TestNewCredentials(t *testing.T) {
 		t.Errorf("ListProfiles() = %d, want %d", len(profiles), len(validKeyTypes))
 	}
 }
+
