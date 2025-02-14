@@ -7,12 +7,15 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 )
 
 type Credentials struct {
@@ -238,4 +241,57 @@ func (c *Credentials) loadProfiles() (map[string]*Profile, error) {
 	}
 
 	return profiles, nil
+}
+
+func (c *Credentials) GenerateCertificate(profile *Profile) (*x509.Certificate, error) {
+	privateKeyBlock, _ := pem.Decode(profile.PrivateKey)
+	if privateKeyBlock == nil {
+		return nil, errors.New("failed to decode private key PEM block")
+	}
+
+	privateKey, err := x509.ParsePKCS8PrivateKey(privateKeyBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKeyBlock, _ := pem.Decode(profile.PublicKey)
+	if publicKeyBlock == nil {
+		return nil, errors.New("failed to decode public key PEM block")
+	}
+
+	publicKey, err := x509.ParsePKIXPublicKey(publicKeyBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(now.Unix()),
+		Subject: pkix.Name{
+			Organization: []string{"GoIdentity"},
+			CommonName:   profile.Name,
+		},
+		Issuer: pkix.Name{
+			Organization: []string{"GoIdentity"},
+			CommonName:   "GoIdentity Root CA", // Or make it configurable
+		},
+		NotBefore:             now.Add(-time.Hour * 24 * 30), // Valid from 30 days ago
+		NotAfter:              now.Add(time.Hour * 24 * 365 * 5),  // Valid for 5 years
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true, // For now, making it a CA for simplicity
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return cert, nil
 }
