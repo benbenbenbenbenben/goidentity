@@ -243,7 +243,7 @@ func (c *Credentials) loadProfiles() (map[string]*Profile, error) {
 	return profiles, nil
 }
 
-func (c *Credentials) GenerateCertificate(profile *Profile) (*x509.Certificate, error) {
+func (profile *Profile) GenerateCertificate() (*x509.Certificate, error) {
 	privateKeyBlock, _ := pem.Decode(profile.PrivateKey)
 	if privateKeyBlock == nil {
 		return nil, errors.New("failed to decode private key PEM block")
